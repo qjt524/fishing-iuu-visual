@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>海洋非法捕捞可视化分析 | 迷你挑战赛2</title>
+    <style>
+        * {margin: 0; padding: 0; box-sizing: border-box;}
+        body {font-family: "Microsoft Yahei", sans-serif; background: #f5f7fa; padding: 20px;}
+        .title {text-align: center; font-size: 24px; margin-bottom: 20px; color: #2c3e50;}
+        .container {display: flex; flex-wrap: wrap; gap: 20px; justify-content: center;}
+        .chart-box {width: 580px; height: 400px; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 8px #ddd;}
+        h3 {font-size: 16px; margin-bottom: 10px; color: #34495e;}
+    </style>
+    <!-- 引入ECharts & D3.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <div class="title">非法、未报告、无管制(IUU)捕捞 可视化分析系统</div>
+    <div class="container">
+        <!-- 图1：海域捕捞密度热力图 ECharts -->
+        <div class="chart-box" id="heatMap">
+            <h3>图1 全域海域捕捞密度热力图（区分正常/可疑区域）</h3>
+        </div>
+
+        <!-- 图2：企业捕捞量时序折线图 ECharts -->
+        <div class="chart-box" id="lineChart">
+            <h3>图2 合规/嫌疑企业捕捞量时序对比图</h3>
+        </div>
+
+        <!-- 图3：进出港数据对比柱状图 ECharts -->
+        <div class="chart-box" id="barChart">
+            <h3>图3 企业自报VS港口实际进出港次数</h3>
+        </div>
+
+        <!-- 图4：数据偏差率柱状图（替换原箱线图） -->
+        <div class="chart-box" id="deviationBarChart">
+            <h3>图4 各企业捕捞数据偏差率柱状图（不确定性评估）</h3>
+        </div>
+
+        <!-- 图5：优化版嫌疑船只航行轨迹图 D3.js -->
+        <div class="chart-box" id="routeChart">
+            <h3>图5 嫌疑船只航行轨迹图（含禁渔区与港口标注）</h3>
+        </div>
+
+        <!-- 图6：违规主体占比饼图 ECharts -->
+        <div class="chart-box" id="pieChart">
+            <h3>图6 企业合规/违规占比统计饼图</h3>
+        </div>
+    </div>
+
+<script>
+// ===================== 模拟业务数据（渔业/IUU捕捞）=====================
+// 1. 海域热力图数据
+const heatData = [
+    {name:"常规作业区", value: 85},
+    {name:"生态保护区(禁渔区)", value: 62},
+    {name:"海域交界区", value: 70},
+    {name:"私人港口周边", value: 78},
+    {name:"正规港口区", value: 30}
+];
+
+// 2. 时序折线图数据：月份、合规企业、嫌疑企业捕捞吨位
+const lineX = ["1月","2月","3月","4月(休渔期)","5月","6月"];
+const lineDataNormal = [120,125,118,40,122,130]; // 合规：休渔期大幅减产
+const lineDataRisk = [115,122,128,110,135,142];  // 嫌疑：休渔期依旧高产量
+
+// 3. 进出港柱状图数据
+const barX = ["企业A","企业B","企业C(高嫌疑)","企业D","企业E(高嫌疑)"];
+const barSelf = [22,18,10,25,12];
+const barReal = [23,19,28,24,30];
+
+// 4. 数据偏差率（图4专用）：偏差越高，数据不确定性越强
+const devX = ["企业A","企业B","企业C(高嫌疑)","企业D","企业E(高嫌疑)"];
+const devData = [4, 3.2, 36.8, 2.7, 40.1];
+
+// 5. 饼图数据：企业类型统计
+const pieData = [
+    {name:"完全合规企业", value: 28},
+    {name:"轻度可疑企业", value: 16},
+    {name:"高度IUU嫌疑企业", value: 9}
+];
+
+// ===================== ECharts 图表渲染 =====================
+// 图1 热力图
+const heatDom = document.getElementById('heatMap');
+const heatChart = echarts.init(heatDom);
+heatChart.setOption({
+    tooltip: {trigger: 'item'},
+    grid: {left: 60, right: 40, top: 40, bottom: 60},
+    xAxis: {type: 'category', data: heatData.map(d=>d.name), axisLabel: {rotate: 15}},
+    yAxis: {type: 'category', data: ['捕捞频次']},
+    visualMap: {min: 0, max: 100, calculable: true, orient: 'horizontal', left: 'center', bottom: '5%'},
+    series: [{
+        type: 'heatmap',
+        data: heatData.map((item,idx)=>[idx,0,item.value]),
+        label: {show: true},
+        itemStyle: {borderColor: '#fff'}
+    }]
+});
+
+// 图2 时序折线图
+const lineDom = document.getElementById('lineChart');
+const lineChart = echarts.init(lineDom);
+lineChart.setOption({
+    tooltip: {trigger: 'axis'},
+    legend: {data: ['合规企业','IUU嫌疑企业']},
+    grid: {left: 60, right: 40, top: 40, bottom: 60},
+    xAxis: {type: 'category', data: lineX},
+    yAxis: {type: 'value', name: '捕捞吨位(吨)'},
+    series: [
+        {name:'合规企业', type:'line', data: lineDataNormal, smooth: true, lineStyle: {color: '#3498db'}},
+        {name:'IUU嫌疑企业', type:'line', data: lineDataRisk, smooth: true, lineStyle: {color: '#e74c3c'}}
+    ]
+});
+
+// 图3 进出港对比柱状图
+const barDom = document.getElementById('barChart');
+const barChart = echarts.init(barDom);
+barChart.setOption({
+    tooltip: {trigger: 'axis'},
+    legend: {data: ['企业自报次数','港口实际登记次数']},
+    grid: {left: 60, right: 40, top: 40, bottom: 60},
+    xAxis: {type: 'category', data: barX, axisLabel: {rotate: 15}},
+    yAxis: {type: 'value', name: '进出港次数'},
+    series: [
+        {name:'企业自报次数', type:'bar', data: barSelf, itemStyle: {color: '#3498db'}},
+        {name:'港口实际登记次数', type:'bar', data: barReal, itemStyle: {color: '#2ecc71'}}
+    ]
+});
+
+// 图4 数据偏差率柱状图
+const devDom = document.getElementById('deviationBarChart');
+const devChart = echarts.init(devDom);
+devChart.setOption({
+    tooltip: {trigger: 'axis', formatter: '{b}<br/>偏差率: {c} %'},
+    grid: {left: 60, right: 40, top: 40, bottom: 60},
+    xAxis: {type: 'category', data: devX, axisLabel: {rotate: 15}},
+    yAxis: {type: 'value', name: '数据偏差率(%)'},
+    series: [{
+        type: 'bar',
+        data: devData.map((val, idx) => {
+            let color = devData[idx] > 30 ? '#e74c3c' : '#3498db';
+            return {value: val, itemStyle: {color: color}};
+        }),
+        label: {show: true, position: 'top'}
+    }]
+});
+
+// 图6 饼图
+const pieDom = document.getElementById('pieChart');
+const pieChart = echarts.init(pieDom);
+pieChart.setOption({
+    tooltip: {trigger: 'item'},
+    legend: {orient: 'vertical', left: 'left'},
+    series: [{
+        type: 'pie', radius: '70%', data: pieData,
+        label: {formatter: '{b}: {d}%'}
+    }]
+});
+
+// ===================== 优化后的 D3.js 船只轨迹图（图5） =====================
+const width = 550;
+const height = 320;
+const margin = {top:20, right:20, bottom:30, left:40};
+
+const routeSvg = d3.select("#routeChart")
+    .append("svg")
+    .attr("width", width)
+    .attr("height", height)
+    .append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+// 1. 绘制背景关键区域（增强业务场景感）
+// 禁渔区/生态保护区（红色虚线框）
+routeSvg.append("rect")
+    .attr("x", 200).attr("y", 50).attr("width", 150).attr("height", 120)
+    .style("fill", "rgba(231, 76, 60, 0.1)")
+    .style("stroke", "#e74c3c")
+    .style("stroke-dasharray", "5,5");
+routeSvg.append("text")
+    .attr("x", 275).attr("y", 40)
+    .attr("text-anchor", "middle")
+    .style("fill", "#e74c3c").style("font-size", "12px")
+    .text("禁渔区/生态保护区");
+
+// 常规作业区（蓝色背景）
+routeSvg.append("rect")
+    .attr("x", 0).attr("y", 180).attr("width", 200).attr("height", 100)
+    .style("fill", "rgba(52, 152, 219, 0.1)");
+routeSvg.append("text")
+    .attr("x", 100).attr("y", 295)
+    .attr("text-anchor", "middle")
+    .style("fill", "#3498db").style("font-size", "12px")
+    .text("常规作业区");
+
+// 2. 港口标记（起点/终点）
+const ports = [
+    {name: "港口A", x: 50, y: 80, type: "start"},
+    {name: "港口B", x: 500, y: 220, type: "end"},
+    {name: "私人停靠点", x: 480, y: 180, type: "end"}
+];
+ports.forEach(p => {
+    routeSvg.append("circle")
+        .attr("cx", p.x).attr("cy", p.y).attr("r", 8)
+        .style("fill", p.type === "start" ? "#27ae60" : "#95a5a6");
+    routeSvg.append("text")
+        .attr("x", p.x + 15).attr("y", p.y + 5)
+        .style("font-size", "10px").text(p.name);
+});
+
+// 3. 模拟2条嫌疑船只航线（带方向箭头）
+const route1 = [[50,80],[150,120],[280,180],[420,100],[500,220]]; // 高风险船1（穿越禁渔区）
+const route2 = [[80,250],[200,200],[350,150],[480,180]];          // 高风险船2（绕开监管港口）
+const line = d3.line();
+
+// 箭头标记定义
+routeSvg.append("defs").selectAll("marker")
+    .data(["arrow-red", "arrow-orange"])
+    .enter().append("marker")
+    .attr("id", d => d)
+    .attr("viewBox", "0 0 10 10")
+    .attr("refX", 9).attr("refY", 5)
+    .attr("markerWidth", 6).attr("markerHeight", 6)
+    .attr("orient", "auto")
+    .append("polygon")
+    .attr("points", "0 0, 10 5, 0 10")
+    .style("fill", d => d === "arrow-red" ? "#e74c3c" : "#f39c12");
+
+// 航线1（红色，高风险）
+routeSvg.append("path")
+    .datum(route1)
+    .attr("d", line)
+    .style("fill","none").style("stroke","#e74c3c").style("stroke-width",3)
+    .attr("marker-end", "url(#arrow-red)");
+// 航线2（橙色，中风险）
+routeSvg.append("path")
+    .datum(route2)
+    .attr("d", line)
+    .style("fill","none").style("stroke","#f39c12").style("stroke-width",3)
+    .attr("marker-end", "url(#arrow-orange)");
+
+// 标记航线关键点（船只位置）
+route1.forEach(p=>{
+    routeSvg.append("circle")
+        .attr("cx",p[0]).attr("cy",p[1]).attr("r",5)
+        .style("fill","#c0392b");
+});
+route2.forEach(p=>{
+    routeSvg.append("circle")
+        .attr("cx",p[0]).attr("cy",p[1]).attr("r",5)
+        .style("fill","#d35400");
+});
+</script>
+</body>
+</html>
